@@ -361,7 +361,9 @@ class WolfBot(object):
 			print('Retrying to get order details...')
 			order=self.bittrex.get_order(order_id)
 		
+		print(order)
 		if (order['result']['CancelInitiated']==True):
+			print("Order has been already canceled.")
 			order_status='canceled'
 		else:
 			check_id=0
@@ -377,11 +379,13 @@ class WolfBot(object):
 			if (order['result']['IsOpen']==True):
 				cancel_response=self.bittrex.cancel(order_id)
 				while cancel_response['success']!=True:
+					print("Retrying to cancel order...")
 					cancel_response=self.bittrex.cancel(order_id)
 				self.orders[order_id]['status']='canceled'
 				order_status='canceled'
 				print('The order has been canceled, due to it\'s time limit expiration.')            
 			else:
+				print("Transaction sold!")
 				# the transaction has proceeded => lower the WolfBot's pocket money 
 				if (self.orders[order_id]['type']=='buy'):
 					self.pocket_money['BTC']=self.pocket_money['BTC']-order['result']['Quantity']*order['result']['Limit']*(1+bittrex_fee)
@@ -392,7 +396,7 @@ class WolfBot(object):
 				self.orders[order_id]['status']='sold'
 				order_status='sold'
 		
-		return order_status    
+		return order_status
 	
 	
 	def bite(self,market,trade_units=1,aggressivness=0.9,buy_rule_dict={}):
@@ -492,8 +496,12 @@ class WolfBot(object):
 					order_sell_response=self.trade_sell(market,sell_price,order_amount)
 				print(order_sell_response)
 				order_status=self.observe_order_status(market,order_sell_response['result']['uuid'],5)
+				print("Order status is {}".format(order_status))				
 		else:
 			order_status=False
+
+		print("Order status is {}".format(order_status))
+
 		return order_status
 	
 	def bite_and_let_go(self,market,buy_rule_dict):
@@ -501,17 +509,18 @@ class WolfBot(object):
 		Buy the increasing stock and sells if market starts to fall + tries to make profit.
 		"""
 		order_status='unplaced'
-		while (self.check_buy_rule(market,0.5)==True and order_status!='sold'):
+		while (self.check_buy_rule(market,0.4)[0]==True and order_status!='sold'):
 			order_buy_response,order_value=self.bite(market=market,trade_units=1,aggressivness=0.99,buy_rule_dict=buy_rule_dict)
 			if (order_buy_response['success']!=True):
 				print("Error: The order did not proceed to the Bittrex order book.")
 				order_status='unplaced'
 			else:
 				print(order_buy_response)
-				order_status=self.observe_order_status(market,order_buy_response['result']['uuid'],10)
+				order_status=self.observe_order_status(market,order_buy_response['result']['uuid'],20)
 		
 		if (order_status=='sold'):
 			self.let_go(market,order_buy_response['result']['uuid'])
+			print("The order has been successfuly sold!")
 		else:
 			pass
 	
@@ -535,23 +544,34 @@ markets={market['MarketName']:{'MarketName':market['MarketName'],
 							   'MinTradeSize':market['MinTradeSize']
 							  } for market in br.get_markets()['result'] if market['MarketName'].startswith('BTC')}
 
-# /GET FERTILE MARKETS
-print("Getting 0.9 quantile markets with respect to its base volume. This takes few minutes, please wait...")
-# assign base_volume to markets
-for market,market_dict in markets.items():
-	market_name=market_dict['MarketName']
-	markets[market_name]['base_volume']=get_market_base_volume(market_dict['MarketName'])
+def get_fertile_markets(): 
+	# /GET FERTILE MARKETS
+	print("Getting 0.9 quantile markets with respect to its base volume. This takes few minutes, please wait...")
+	# assign base_volume to markets
+	for market,market_dict in markets.items():
+		market_name=market_dict['MarketName']
+		markets[market_name]['base_volume']=get_market_base_volume(market_dict['MarketName'])
 
-sum_base_volume=sum([market_dict['base_volume'] for market,market_dict in markets.items()])
+	sum_base_volume=sum([market_dict['base_volume'] for market,market_dict in markets.items()])
 
-# assign proxy for liquidity as a fraction of base_volume to markets
-for market,market_dict in markets.items():
-	market_name=market_dict['MarketName']
-	markets[market_name]['liquidity']=markets[market_name]['base_volume']/sum_base_volume
+	# assign proxy for liquidity as a fraction of base_volume to markets
+	for market,market_dict in markets.items():
+		market_name=market_dict['MarketName']
+		markets[market_name]['liquidity']=markets[market_name]['base_volume']/sum_base_volume
 
-# get top quartile of markets by liquidity   
-liquidity_90q=np.percentile([market_dict['liquidity'] for market,market_dict in markets.items()],90)
-markets_90q={market:market_dict for market,market_dict in markets.items() if market_dict['liquidity']>liquidity_90q}
+	# get top quartile of markets by liquidity   
+	liquidity_90q=np.percentile([market_dict['liquidity'] for market,market_dict in markets.items()],90)
+	markets_90q={market:market_dict for market,market_dict in markets.items() if market_dict['liquidity']>liquidity_90q}
+
+	return markets_90q
+
+
+# Save
+#markets_90q=get_fertile_markets()
+#np.save('markets_90q.npy', markets_90q) 
+
+# Load
+markets_90q = np.load('markets_90q.npy').item()
 # GET FERTILE MARKETS/
 
 
